@@ -1,1 +1,514 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+}
+
+body {
+    background: #000;
+    color: white;
+    font-family: Arial, Helvetica, sans-serif;
+    overflow: hidden;
+}
+
+
+/* =========================================
+   MAIN INTERFACE
+========================================= */
+
+.interface {
+
+    width: 100vw;
+    height: 100vh;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    position: relative;
+
+    background:
+        radial-gradient(
+            circle at center,
+            rgba(0, 130, 255, 0.07),
+            transparent 42%
+        );
+
+}
+
+
+/* =========================================
+   CENTER
+========================================= */
+
+.center {
+
+    width: 600px;
+    height: 700px;
+
+    display: flex;
+    flex-direction: column;
+
+    justify-content: center;
+    align-items: center;
+
+    position: relative;
+}
+
+
+/* =========================================
+   PARTICLE CANVAS
+========================================= */
+
+#sphere {
+
+    width: 600px;
+    height: 600px;
+
+    display: block;
+}
+
+
+/* =========================================
+   JARVIS NAME
+========================================= */
+
+.name {
+
+    margin-top: -40px;
+
+    font-size: 16px;
+
+    letter-spacing: 8px;
+
+    color: #00cfff;
+
+    text-shadow:
+        0 0 10px #00bfff,
+        0 0 25px #008cff;
+
+}
+
+
+/* =========================================
+   TRANSCRIPT
+========================================= */
+
+.transcript {
+
+    margin-top: 15px;
+
+    max-width: 500px;
+
+    min-height: 25px;
+
+    text-align: center;
+
+    font-size: 13px;
+
+    color: rgba(255, 255, 255, 0.55);
+
+}
+
+
+/* =========================================
+   PANELS
+========================================= */
+
+.left-panel,
+.right-panel {
+
+    position: absolute;
+
+    top: 50%;
+
+    transform: translateY(-50%);
+
+    width: 230px;
+
+    padding: 25px;
+
+    background:
+        rgba(0, 15, 30, 0.3);
+
+    border-left:
+        1px solid rgba(0, 190, 255, 0.2);
+
+    border-right:
+        1px solid rgba(0, 190, 255, 0.2);
+
+    backdrop-filter: blur(5px);
+
+
+}
+
+.left-panel {
+    left: 4%;
+}
+
+
+.right-panel {
+    right: 4%;
+}
+
+
+/* =========================================
+   PANEL TITLES
+========================================= */
+
+.panel-title {
+
+    color: #00cfff;
+
+    font-size: 11px;
+
+    letter-spacing: 3px;
+
+    margin-bottom: 25px;
+
+}
+
+
+/* =========================================
+   CURRENT STATUS
+========================================= */
+
+.current-status {
+
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+
+    color: #00eaff;
+
+    font-size: 14px;
+
+    letter-spacing: 2px;
+
+    margin-bottom: 25px;
+
+}
+
+
+.status-dot {
+
+    width: 7px;
+    height: 7px;
+
+    border-radius: 50%;
+
+    background: #00eaff;
+
+    box-shadow:
+        0 0 10px #00eaff;
+
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; box-shadow: 0 0 10px #00eaff; }
+    50%       { opacity: 0.4; box-shadow: 0 0 4px #00eaff; }
+}
+
+
+/* =========================================
+   MODES
+========================================= */
+
+.mode {
+
+    color: rgba(255, 255, 255, 0.2);
+
+    font-size: 10px;
+
+    letter-spacing: 2px;
+
+    margin: 16px 0;
+
+    transition: 0.3s;
+
+}
+
+
+.mode.active {
+
+    color: #00cfff;
+
+    text-shadow:
+        0 0 10px #00bfff;
+
+}
+
+
+/* =========================================
+   SYSTEM INFO
+========================================= */
+
+.system-info {
+
+    margin-top: 35px;
+
+    font-size: 9px;
+
+    color: rgba(255, 255, 255, 0.35);
+
+}
+
+
+.system-info div {
+
+    display: flex;
+
+    justify-content: space-between;
+
+    margin: 13px 0;
+
+}
+
+
+.system-info span {
+
+    color: #00bfff;
+
+}
+
+
+/* =========================================
+   AI ACTIVITY
+========================================= */
+
+#activity {
+
+    max-height: 300px;
+
+    overflow: hidden;
+
+}
+
+
+.activity-line {
+
+    display: flex;
+
+    align-items: flex-start;
+
+    gap: 9px;
+
+    margin-bottom: 15px;
+
+    font-size: 10px;
+
+    line-height: 1.5;
+
+    color: rgba(255, 255, 255, 0.5);
+
+    animation: activityIn 0.4s ease;
+
+}
+
+
+.activity-dot {
+
+    width: 5px;
+    height: 5px;
+
+    min-width: 5px;
+
+    margin-top: 4px;
+
+    border-radius: 50%;
+
+    background: #00bfff;
+
+    box-shadow:
+        0 0 8px #00bfff;
+
+}
+
+
+/* =========================================
+   ACTIVITY ANIMATION
+========================================= */
+
+@keyframes activityIn {
+
+    from {
+        opacity: 0;
+        transform: translateX(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+
+}
+
+
+/* =========================================
+   CODE CHANGE MODAL
+========================================= */
+
+.code-modal {
+
+    display: none;
+
+    position: fixed;
+    top: 0;
+    left: 0;
+
+    width: 100vw;
+    height: 100vh;
+
+    background: rgba(0, 0, 0, 0.88);
+
+    z-index: 999;
+
+    align-items: center;
+    justify-content: center;
+
+}
+
+.code-modal.visible {
+
+    display: flex;
+
+}
+
+.code-modal-box {
+
+    background: rgba(0, 10, 22, 0.97);
+
+    border: 1px solid rgba(0, 190, 255, 0.35);
+
+    padding: 35px;
+
+    width: 90%;
+    max-width: 620px;
+
+    animation: activityIn 0.25s ease;
+
+}
+
+.code-modal-desc {
+
+    color: rgba(255, 255, 255, 0.65);
+
+    font-size: 13px;
+    letter-spacing: 1px;
+
+    margin-bottom: 18px;
+
+}
+
+.code-modal-diff {
+
+    background: rgba(0, 0, 0, 0.55);
+
+    border: 1px solid rgba(0, 190, 255, 0.12);
+
+    padding: 14px;
+
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    letter-spacing: 0;
+    line-height: 1.6;
+
+    color: #00cfff;
+
+    white-space: pre-wrap;
+    overflow-y: auto;
+    max-height: 220px;
+
+    margin-bottom: 25px;
+
+}
+
+.code-modal-actions {
+
+    display: flex;
+    gap: 14px;
+
+}
+
+.btn-deploy,
+.btn-cancel {
+
+    background: none;
+
+    border: 1px solid rgba(0, 190, 255, 0.4);
+
+    color: #00cfff;
+
+    padding: 10px 22px;
+
+    font-size: 10px;
+    letter-spacing: 3px;
+
+    cursor: pointer;
+
+    transition: 0.2s;
+
+}
+
+.btn-deploy:hover {
+
+    background: rgba(0, 190, 255, 0.12);
+    border-color: #00cfff;
+
+}
+
+.btn-cancel {
+
+    color: rgba(255, 255, 255, 0.35);
+    border-color: rgba(255, 255, 255, 0.15);
+
+}
+
+.btn-cancel:hover {
+
+    background: rgba(255, 255, 255, 0.04);
+
+}
+
+
+/* =========================================
+   MOBILE
+========================================= */
+
+@media (max-width: 900px) {
+
+    .left-panel,
+    .right-panel {
+
+        display: none;
+
+    }
+
+    .center {
+
+        width: 100vw;
+        height: 100vh;
+
+    }
+
+    #sphere {
+
+        width: 100vw;
+        height: 100vw;
+
+        max-width: 600px;
+        max-height: 600px;
+
+    }
+
+}
 
