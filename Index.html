@@ -1,1 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>J.A.R.V.I.S.</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- topojson — loads before the module so it's available as window.topojson -->
+  <script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+</head>
+<body>
+
+<!-- ===================== MAIN HUD ===================== -->
+<div class="interface">
+
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+    <div class="panel-title">SYSTEM STATUS</div>
+
+    <div class="current-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">BOOT</span>
+    </div>
+
+    <div class="mode" id="modeStandby">STANDBY</div>
+    <div class="mode" id="modeListening">LISTENING</div>
+    <div class="mode" id="modeProcessing">PROCESSING</div>
+    <div class="mode" id="modeSpeaking">SPEAKING</div>
+
+    <div class="system-info">
+      <div><span>AI MODEL</span>  <span>LLAMA-3.3-70B</span></div>
+      <div><span>MEMORY</span>   <span>FIREBASE</span></div>
+      <div><span>VOICE</span>    <span id="voiceStatus">—</span></div>
+      <div><span>PHONE</span>    <span id="phoneStatus">—</span></div>
+      <div><span>GITHUB</span>   <span id="githubStatus">—</span></div>
+    </div>
+  </div>
+
+  <!-- CENTER -->
+  <div class="center">
+    <canvas id="sphere" width="600" height="600"></canvas>
+    <div class="name">J.A.R.V.I.S.</div>
+    <div class="transcript" id="transcript">Say "Jarvis" to activate</div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+    <div class="panel-title">AI ACTIVITY</div>
+    <div id="activity"></div>
+  </div>
+
+</div>
+
+<!-- =============== CODE CHANGE MODAL =============== -->
+<div id="codeModal" class="code-modal">
+  <div class="code-modal-box">
+    <div class="panel-title" style="margin-bottom:14px">⚡ CODE CHANGE PROPOSED</div>
+    <div id="codeModalDesc" class="code-modal-desc"></div>
+    <div id="codeModalDiff" class="code-modal-diff"></div>
+    <div class="code-modal-actions">
+      <button id="btnDeploy" class="btn-deploy">DEPLOY TO GITHUB</button>
+      <button id="btnCancel" class="btn-cancel">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ==================== MAIN SCRIPT ==================== -->
+<script type="module">
+
+// ── Firebase ─────────────────────────────────────────────
+import { initializeApp } from
+  'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import {
+  getFirestore, collection, doc,
+  addDoc, getDocs, setDoc, updateDoc, onSnapshot,
+  query, orderBy, limit, serverTimestamp
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+// ═══════════════════════════════════════════════════════════
+//   ⚙️  CONFIG  ─  paste your keys here before uploading
+// ═══════════════════════════════════════════════════════════
+const GROQ_KEY    = 'YOUR_GROQ_API_KEY_HERE';
+const GH_TOKEN    = 'YOUR_GITHUB_TOKEN_HERE';
+const GH_USER     = 'marbej56-lab';
+const GH_REPO     = 'Jarv.ult';
+
+// ── Firebase config (already yours) ──────────────────────
+const firebaseConfig = {
+  apiKey:            'AIzaSyBp5PCpaeB3hRVeGeF-rmAlkKGYvsOFXWE',
+  authDomain:        'jarvis-memory-b4d7a.firebaseapp.com',
+  projectId:         'jarvis-memory-b4d7a',
+  storageBucket:     'jarvis-memory-b4d7a.firebasestorage.app',
+  messagingSenderId: '210322906311',
+  appId:             '1:210322906311:web:1a8c70feeeab21822c72e2'
+};
+const fbApp = initializeApp(firebaseConfig);
+const db    = getFirestore(fbApp);
+
+
+// ═══════════════════════════════════════════════════════════
+//   CANVAS SETUP
+// ═══════════════════════════════════════════════════════════
+const canvas = document.getElementById('sphere');
+const ctx    = canvas.getContext('2d');
+const W = 600, H = 600, CX = 300, CY = 300;
+const RADIUS  = 215;
+
+let dots       = [];
+let rotY       = 0;
+let audioLevel = 0;
+
+
+// ═══════════════════════════════════════════════════════════
+//   EARTH SPHERE  —  continents as dots, buildings as glows
+// ═══════════════════════════════════════════════════════════
+async function buildEarth() {
+  setStatus('LOADING EARTH…');
+
+  try {
+    const res   = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/land-110m.json');
+    const world = await res.json();
+
+    // ── land mask canvas (1440 × 720 = 1 px per 0.25°) ──
+    const MW = 1440, MH = 720;
+    const mask   = document.createElement('canvas');
+    mask.width   = MW;
+    mask.height  = MH;
+    const mCtx   = mask.getContext('2d');
+    mCtx.fillStyle = '#000';
+    mCtx.fillRect(0, 0, MW, MH);
+
+    // Equirectangular projection
+    const project = ([lon, lat]) => [
+      ((lon + 180) / 360) * MW,
+      ((90  - lat) / 180) * MH
+    ];
+
+    // Draw land polygons as white fill
+    mCtx.fillStyle = '#fff';
+    mCtx.beginPath();
+
+    const land = topojson.feature(world, world.objects.land);
+
+    function drawGeom(geom) {
+      if (!geom) return;
+      const polys =
+        geom.type === 'MultiPolygon' ? geom.coordinates :
+        geom.type === 'Polygon'      ? [geom.coordinates] : [];
+
+      for (const poly of polys) {
+        for (const ring of poly) {
+          const [start, ...rest] = ring;
+          const [sx, sy] = project(start);
+          mCtx.moveTo(sx, sy);
+          for (const c of rest) {
+            const [x, y] = project(c);
+            mCtx.lineTo(x, y);
+          }
+          mCtx.closePath();
+        }
+      }
+    }
+
+    if (land.type === 'Feature') {
+      drawGeom(land.geometry);
+    } else if (land.type === 'FeatureCollection') {
+      for (const f of land.features) drawGeom(f.geometry);
+    }
+
+    mCtx.fill('evenodd');
+
+    // ── sample mask ──
+    const img = mCtx.getImageData(0, 0, MW, MH);
+
+    function isLand(lon, lat) {
+      const px = Math.max(0, Math.min(MW - 1, Math.floor(((lon + 180) / 360) * MW)));
+      const py = Math.max(0, Math.min(MH - 1, Math.floor(((90 - lat)  / 180) * MH)));
+      return img.data[(py * MW + px) * 4] > 128;
+    }
+
+    // ── generate dots uniformly on sphere, keep land ──
+    const TARGET = 10000;
+    dots = [];
+    let tries = 0;
+
+    while (dots.length < TARGET && tries < TARGET * 18) {
+      tries++;
+      const theta = 2 * Math.PI * Math.random();       // 0 → 2π
+      const phi   = Math.acos(2 * Math.random() - 1);  // 0 → π
+
+      const lon = theta * (180 / Math.PI) - 180;
+      const lat = 90 - phi * (180 / Math.PI);
+
+      if (!isLand(lon, lat)) continue;
+
+      const building = Math.random() < 0.038;
+
+      dots.push({
+        ux: Math.sin(phi) * Math.cos(theta),
+        uy: Math.cos(phi),
+        uz: Math.sin(phi) * Math.sin(theta),
+        r:  RADIUS + (building ? 3 + Math.random() * 7 : 0),
+        building,
+        sz:   building ? 1.1 + Math.random() * 1.3 : 0.5 + Math.random() * 0.42,
+        glow: 0.55 + Math.random() * 0.45
+      });
+    }
+
+    console.log(`🌍 ${dots.length} land dots  (${tries} attempts)`);
+
+  } catch (err) {
+    console.warn('World data failed, using fallback sphere:', err);
+    fallbackSphere();
+  }
+
+  setStatus('ONLINE');
+  animate();
+}
+
+function fallbackSphere() {
+  const N = 4000, phi = Math.PI * (3 - Math.sqrt(5));
+  dots = Array.from({ length: N }, (_, i) => {
+    const y  = 1 - (i / (N - 1)) * 2;
+    const r  = Math.sqrt(1 - y * y);
+    const t  = phi * i;
+    return { ux: Math.cos(t) * r, uy: y, uz: Math.sin(t) * r,
+             r: RADIUS, building: false, sz: 0.7, glow: 0.7 };
+  });
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   ANIMATION LOOP
+// ═══════════════════════════════════════════════════════════
+function animate() {
+  requestAnimationFrame(animate);
+  ctx.clearRect(0, 0, W, H);
+  rotY += 0.0013;
+
+  const cosY = Math.cos(rotY);
+  const sinY = Math.sin(rotY);
+  const visible = [];
+
+  for (const d of dots) {
+    const x = d.ux * cosY + d.uz * sinY;
+    const y = d.uy;
+    const z = -d.ux * sinY + d.uz * cosY;
+    if (z < -0.05) continue;                    // hide far hemisphere
+    const rr    = d.r * (1 + audioLevel * 0.07);
+    const depth = (z + 1) / 2;                 // 0–1
+    visible.push({ sx: CX + x * rr, sy: CY - y * rr, depth, d });
+  }
+
+  visible.sort((a, b) => a.depth - b.depth);   // back → front
+
+  for (const { sx, sy, depth, d } of visible) {
+    const alpha = 0.22 + depth * 0.72;
+    const size  = d.sz * (0.3 + depth * 0.7) * (1 + audioLevel * 0.18);
+
+    if (d.building) {
+      // warm glow halo
+      ctx.beginPath();
+      ctx.arc(sx, sy, size * 4, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,210,90,${0.045 * depth * d.glow})`;
+      ctx.fill();
+      // bright core
+      ctx.beginPath();
+      ctx.arc(sx, sy, size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,242,165,${alpha * d.glow})`;
+      ctx.fill();
+    } else {
+      // continent dot — JARVIS cyan-blue, depth-shaded
+      const rr = Math.floor(8  + depth * 55);
+      const gg = Math.floor(145 + depth * 95);
+      ctx.beginPath();
+      ctx.arc(sx, sy, size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(${rr},${gg},255,${alpha * d.glow})`;
+      ctx.fill();
+    }
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   MICROPHONE ANALYSER  (sphere reactivity)
+// ═══════════════════════════════════════════════════════════
+async function initMic() {
+  try {
+    const stream  = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const actx    = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = actx.createAnalyser();
+    analyser.fftSize = 256;
+    actx.createMediaStreamSource(stream).connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+
+    ;(function tick() {
+      requestAnimationFrame(tick);
+      analyser.getByteFrequencyData(data);
+      audioLevel = data.reduce((s, v) => s + v, 0) / data.length / 128;
+    })();
+
+    document.getElementById('voiceStatus').textContent = 'ACTIVE';
+  } catch {
+    document.getElementById('voiceStatus').textContent = 'NO MIC';
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   FIREBASE MEMORY
+// ═══════════════════════════════════════════════════════════
+async function memSave(userMsg, jarvisReply) {
+  try {
+    await addDoc(collection(db, 'conversations'), {
+      user: userMsg, jarvis: jarvisReply, ts: serverTimestamp()
+    });
+  } catch (e) { console.warn('Memory save:', e); }
+}
+
+async function memLoad(n = 8) {
+  try {
+    const q    = query(collection(db, 'conversations'),
+                       orderBy('ts', 'desc'), limit(n));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data()).reverse();
+  } catch { return []; }
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   PHONE COMMANDS  via Firebase
+// ═══════════════════════════════════════════════════════════
+async function phoneCmd(type, params) {
+  try {
+    await setDoc(doc(db, 'phone_commands', 'latest'), {
+      type, params, ts: serverTimestamp(), done: false
+    });
+    document.getElementById('phoneStatus').textContent = 'SENT ✓';
+    setTimeout(() => {
+      document.getElementById('phoneStatus').textContent = 'LINKED';
+    }, 3000);
+  } catch (e) { console.warn('Phone cmd:', e); }
+}
+
+// Watch phone heartbeat
+onSnapshot(doc(db, 'phone_commands', 'status'), snap => {
+  if (!snap.exists()) return;
+  const ms   = snap.data()?.lastSeen?.toMillis?.() ?? 0;
+  const live = Date.now() - ms < 90_000;
+  document.getElementById('phoneStatus').textContent = live ? 'LINKED' : 'OFFLINE';
+});
+
+
+// ═══════════════════════════════════════════════════════════
+//   GITHUB API
+// ═══════════════════════════════════════════════════════════
+const GH = `https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents`;
+const ghHeaders = () => ({
+  'Authorization': `token ${GH_TOKEN}`,
+  'Accept':        'application/vnd.github.v3+json',
+  'Content-Type':  'application/json'
+});
+
+async function ghGet(path) {
+  const r = await fetch(`${GH}/${path}`, { headers: ghHeaders() });
+  if (!r.ok) throw new Error(`GitHub GET ${path}: ${r.status}`);
+  const d = await r.json();
+  return { content: atob(d.content.replace(/\n/g, '')), sha: d.sha };
+}
+
+async function ghPut(path, content, sha, msg) {
+  const r = await fetch(`${GH}/${path}`, {
+    method:  'PUT',
+    headers: ghHeaders(),
+    body: JSON.stringify({
+      message: msg || `JARVIS: update ${path}`,
+      content: btoa(unescape(encodeURIComponent(content))),
+      sha
+    })
+  });
+  if (!r.ok) throw new Error(`GitHub PUT ${path}: ${r.status}`);
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   CODE CHANGE MODAL
+// ═══════════════════════════════════════════════════════════
+let pendingChange = null;
+
+function showCodeModal(change) {
+  pendingChange = change;
+  document.getElementById('codeModalDesc').textContent = change.description;
+  document.getElementById('codeModalDiff').textContent =
+    `FILE ▸ ${change.file}\n\nFIND:\n${change.find}\n\nREPLACE WITH:\n${change.replace}`;
+  document.getElementById('codeModal').classList.add('visible');
+}
+
+document.getElementById('btnDeploy').onclick = async () => {
+  if (!pendingChange) return;
+  document.getElementById('codeModal').classList.remove('visible');
+  addLine('⚙️ Deploying change to GitHub…');
+  speak('Deploying the change now, sir.');
+  try {
+    const { content, sha } = await ghGet(pendingChange.file);
+    const updated = content.replace(pendingChange.find, pendingChange.replace);
+    if (updated === content) {
+      speak('I could not locate the target code. The search text may need adjusting.');
+      addLine('⚠️ No match found — change cancelled.');
+      return;
+    }
+    await ghPut(pendingChange.file, updated, sha, `JARVIS: ${pendingChange.description}`);
+    addLine(`✅ Deployed: ${pendingChange.description}`);
+    speak('Change deployed successfully. GitHub Pages will update in about 30 seconds.');
+    document.getElementById('githubStatus').textContent = 'DEPLOYED ✓';
+    setTimeout(() => document.getElementById('githubStatus').textContent = 'READY', 6000);
+  } catch (e) {
+    addLine('❌ Deploy failed: ' + e.message);
+    speak('Deployment failed, sir. Please verify your GitHub token.');
+  }
+  pendingChange = null;
+};
+
+document.getElementById('btnCancel').onclick = () => {
+  document.getElementById('codeModal').classList.remove('visible');
+  pendingChange = null;
+  speak('Understood. Change cancelled.');
+};
+
+
+// ═══════════════════════════════════════════════════════════
+//   GROQ API  +  SYSTEM PROMPT
+// ═══════════════════════════════════════════════════════════
+const SYSTEM = `You are J.A.R.V.I.S. (Just A Rather Very Intelligent System), Tony Stark's AI assistant. Speak with dry British wit and professional precision. Be competent, slightly sardonic when warranted, and always helpful.
+
+━━ PHONE CONTROL ━━
+Emit these silent JSON tags to control the user's Android phone:
+<command>{"type":"call","number":"+1XXXXXXXXXX","name":"Contact"}</command>
+<command>{"type":"sms","number":"+1XXXXXXXXXX","name":"Name","message":"text"}</command>
+<command>{"type":"openUrl","url":"https://..."}</command>
+<command>{"type":"openApp","scheme":"spotify://","name":"Spotify"}</command>
+<command>{"type":"notification","title":"Title","body":"Body text"}</command>
+Common app schemes: youtube://, maps://, mailto:, instagram://, twitter://
+
+━━ CODE CHANGES ━━
+To modify your own interface, emit:
+<codechange>{"file":"index.html","description":"what changed","find":"exact string","replace":"new string"}</codechange>
+Use exact literal strings for find/replace. Target style.css for visual changes.
+
+━━ VOICE RULES ━━
+Responses are read aloud. Keep spoken text to 1–3 concise sentences. Never narrate or describe your command tags. Today: ${new Date().toLocaleDateString('en-GB',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}.`;
+
+async function askGroq(messages) {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${GROQ_KEY}`
+    },
+    body: JSON.stringify({
+      model:       'llama-3.3-70b-versatile',
+      messages:    [{ role: 'system', content: SYSTEM }, ...messages],
+      temperature: 0.75,
+      max_tokens:  900
+    })
+  });
+  const d = await res.json();
+  if (!d.choices) throw new Error(d.error?.message || JSON.stringify(d));
+  return d.choices[0].message.content;
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   COMMAND PROCESSOR
+// ═══════════════════════════════════════════════════════════
+async function process(text) {
+  if (!text?.trim()) return;
+
+  setMode('PROCESSING');
+  addLine(`🧑 ${text}`);
+  document.getElementById('transcript').textContent = text;
+
+  try {
+    const history  = await memLoad(8);
+    const messages = history.flatMap(m => [
+      { role: 'user',      content: m.user   },
+      { role: 'assistant', content: m.jarvis }
+    ]);
+    messages.push({ role: 'user', content: text });
+
+    const raw = await askGroq(messages);
+
+    // Strip tags for spoken text
+    const spoken = raw
+      .replace(/<command>[\s\S]*?<\/command>/g, '')
+      .replace(/<codechange>[\s\S]*?<\/codechange>/g, '')
+      .trim();
+
+    setMode('SPEAKING');
+    speak(spoken);
+    addLine(`🤖 ${spoken}`);
+    document.getElementById('transcript').textContent = spoken;
+    await memSave(text, spoken);
+
+    // ── phone commands ──
+    for (const m of raw.matchAll(/<command>([\s\S]*?)<\/command>/g)) {
+      try {
+        const cmd = JSON.parse(m[1]);
+        await phoneCmd(cmd.type, cmd);
+        addLine(`📱 Phone ▸ ${cmd.type}${cmd.name ? ' → ' + cmd.name : ''}`);
+      } catch (e) { console.warn('Bad command JSON:', e); }
+    }
+
+    // ── code changes ──
+    for (const m of raw.matchAll(/<codechange>([\s\S]*?)<\/codechange>/g)) {
+      try {
+        const change = JSON.parse(m[1]);
+        addLine(`💻 Code change ready: ${change.description}`);
+        showCodeModal(change);
+      } catch (e) { console.warn('Bad codechange JSON:', e); }
+    }
+
+  } catch (e) {
+    speak('I encountered an error, sir. Please check the API configuration.');
+    addLine('❌ Error: ' + e.message);
+    console.error(e);
+  }
+
+  setMode('STANDBY');
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   VOICE RECOGNITION  +  WAKE WORD  ("jarvis")
+// ═══════════════════════════════════════════════════════════
+let active = false;
+let timer  = null;
+let rec    = null;
+
+function initVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    addLine('⚠️ Speech recognition not available in this browser. Use Chrome or Safari.');
+    return;
+  }
+
+  rec = new SR();
+  rec.continuous     = true;
+  rec.interimResults = true;
+  rec.lang           = 'en-US';
+
+  rec.onresult = e => {
+    let full = '', final = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) final += t;
+      full += t;
+    }
+
+    const lower = full.toLowerCase();
+    document.getElementById('transcript').textContent = full;
+
+    if (!active && lower.includes('jarvis')) {
+      active = true;
+      setMode('LISTENING');
+      speak('Yes?');
+
+      // Command might follow the wake word in the same utterance
+      const afterWake = lower.split('jarvis').slice(1).join('').trim();
+      clearTimeout(timer);
+      if (afterWake.length > 3) {
+        timer = setTimeout(() => { process(afterWake); active = false; }, 1100);
+      } else {
+        // Wait up to 12 s for a follow-up command
+        timer = setTimeout(() => { active = false; setMode('STANDBY'); }, 12_000);
+      }
+
+    } else if (active && final) {
+      clearTimeout(timer);
+      timer = setTimeout(() => { process(final); active = false; }, 750);
+    }
+  };
+
+  rec.onend  = () => { if (!rec._stopped) setTimeout(() => rec.start(), 500); };
+  rec.onerror = e => {
+    if (e.error === 'not-allowed') { addLine('⚠️ Microphone blocked. Enable it in browser settings.'); return; }
+    setTimeout(() => rec.start(), 1200);
+  };
+
+  rec.start();
+  document.getElementById('voiceStatus').textContent = 'ONLINE';
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   TTS
+// ═══════════════════════════════════════════════════════════
+function speak(text) {
+  if (!text) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate   = 0.87;
+  u.pitch  = 0.72;
+  u.volume = 1;
+
+  const pick = () => {
+    const vv = speechSynthesis.getVoices();
+    const v  = vv.find(v =>
+      v.name.includes('Daniel') ||   // British male on Apple devices
+      v.lang === 'en-GB'         ||
+      v.name.toLowerCase().includes('male')
+    ) || vv[0];
+    if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  };
+
+  speechSynthesis.getVoices().length ? pick()
+    : (speechSynthesis.onvoiceschanged = pick);
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   UI HELPERS
+// ═══════════════════════════════════════════════════════════
+const MODES = {
+  STANDBY:    'modeStandby',
+  LISTENING:  'modeListening',
+  PROCESSING: 'modeProcessing',
+  SPEAKING:   'modeSpeaking'
+};
+
+function setMode(m) {
+  Object.values(MODES).forEach(id =>
+    document.getElementById(id).classList.remove('active'));
+  if (MODES[m]) document.getElementById(MODES[m]).classList.add('active');
+  document.getElementById('statusText').textContent = m;
+}
+
+function setStatus(s) {
+  document.getElementById('statusText').textContent = s;
+}
+
+function addLine(text) {
+  const panel = document.getElementById('activity');
+  const div   = document.createElement('div');
+  div.className = 'activity-line';
+  div.innerHTML = `<div class="activity-dot"></div><span>${text}</span>`;
+  panel.prepend(div);
+  while (panel.children.length > 18) panel.removeChild(panel.lastChild);
+}
+
+
+// ═══════════════════════════════════════════════════════════
+//   BOOT
+// ═══════════════════════════════════════════════════════════
+(async function boot() {
+  addLine('⚡ Booting J.A.R.V.I.S. systems…');
+  await buildEarth();
+  await initMic();
+  initVoice();
+  setMode('STANDBY');
+  document.getElementById('githubStatus').textContent = GH_TOKEN !== 'YOUR_GITHUB_TOKEN_HERE' ? 'READY' : 'NO KEY';
+  addLine('✅ All systems online. Awaiting your command.');
+  setTimeout(() => speak('Good day. All systems are online and ready.'), 800);
+})();
+
+</script>
+</body>
+</html>
 
