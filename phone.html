@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- PWA: lets Android add this to home screen like an app -->
+  <meta name="mobile-web-app-capable"      content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color"                  content="#000000">
+  <link rel="manifest" href="manifest.json">
+
+  <title>JARVIS Phone Link</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html, body { width:100%; height:100%; background:#000; color:#fff;
+                 font-family: Arial, Helvetica, sans-serif; }
+
+    .screen {
+      width: 100vw; height: 100vh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 30px;
+      background: radial-gradient(circle at center,
+        rgba(0,130,255,0.06), transparent 60%);
+    }
+
+    .logo {
+      font-size: 13px; letter-spacing: 9px;
+      color: #00cfff;
+      text-shadow: 0 0 12px #00bfff, 0 0 28px #008cff;
+    }
+
+    .status-ring {
+      width: 110px; height: 110px;
+      border-radius: 50%;
+      border: 1px solid rgba(0,190,255,0.25);
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+    }
+
+    .status-ring::before {
+      content: '';
+      position: absolute;
+      width: 90px; height: 90px;
+      border-radius: 50%;
+      border: 1px solid rgba(0,190,255,0.12);
+    }
+
+    .status-dot-big {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #00eaff;
+      box-shadow: 0 0 16px #00eaff;
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%,100% { opacity:1; box-shadow: 0 0 16px #00eaff; }
+      50%      { opacity:0.3; box-shadow: 0 0 5px #00eaff; }
+    }
+
+    .status-dot-big.offline {
+      background: rgba(255,255,255,0.2);
+      box-shadow: none;
+      animation: none;
+    }
+
+    .status-text {
+      font-size: 11px; letter-spacing: 3px;
+      color: #00cfff;
+    }
+
+    .status-text.offline { color: rgba(255,255,255,0.3); }
+
+    .log-panel {
+      width: 88%; max-width: 360px;
+      padding: 20px;
+      background: rgba(0,15,30,0.4);
+      border: 1px solid rgba(0,190,255,0.15);
+    }
+
+    .log-title {
+      font-size: 10px; letter-spacing: 3px;
+      color: #00cfff; margin-bottom: 16px;
+    }
+
+    .log-entry {
+      font-size: 11px; letter-spacing: 1px;
+      color: rgba(255,255,255,0.45);
+      margin: 10px 0;
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+
+    .log-dot {
+      width: 4px; height: 4px; min-width: 4px;
+      border-radius: 50%; background: #00bfff;
+      box-shadow: 0 0 6px #00bfff;
+      margin-top: 4px;
+    }
+
+    .notif-btn {
+      background: none;
+      border: 1px solid rgba(0,190,255,0.35);
+      color: #00cfff;
+      padding: 10px 24px;
+      font-size: 10px; letter-spacing: 3px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+
+    .notif-btn:hover { background: rgba(0,190,255,0.1); }
+
+    .hint {
+      font-size: 10px; letter-spacing: 1px;
+      color: rgba(255,255,255,0.2);
+      text-align: center; max-width: 280px;
+      line-height: 1.8;
+    }
+  </style>
+</head>
+<body>
+
+<div class="screen">
+
+  <div class="logo">J.A.R.V.I.S. PHONE LINK</div>
+
+  <div class="status-ring">
+    <div class="status-dot-big" id="dot"></div>
+  </div>
+
+  <div class="status-text" id="statusText">CONNECTING…</div>
+
+  <div class="log-panel">
+    <div class="log-title">COMMAND LOG</div>
+    <div id="log"><div class="log-entry"><div class="log-dot"></div><span>Waiting for commands…</span></div></div>
+  </div>
+
+  <button class="notif-btn" id="notifBtn">ENABLE NOTIFICATIONS</button>
+
+  <div class="hint">
+    Keep this page open in the background.<br>
+    Add to Home Screen for best results.
+  </div>
+
+</div>
+
+
+<script type="module">
+
+// ── Firebase ─────────────────────────────────────────────
+import { initializeApp } from
+  'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import {
+  getFirestore, doc, setDoc, updateDoc,
+  onSnapshot, serverTimestamp
+} from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+// ── Same Firebase config as index.html ───────────────────
+const firebaseConfig = {
+  apiKey:            'AIzaSyBp5PCpaeB3hRVeGeF-rmAlkKGYvsOFXWE',
+  authDomain:        'jarvis-memory-b4d7a.firebaseapp.com',
+  projectId:         'jarvis-memory-b4d7a',
+  storageBucket:     'jarvis-memory-b4d7a.firebasestorage.app',
+  messagingSenderId: '210322906311',
+  appId:             '1:210322906311:web:1a8c70feeeab21822c72e2'
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const db    = getFirestore(fbApp);
+
+
+// ── UI refs ───────────────────────────────────────────────
+const dot        = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const logPanel   = document.getElementById('log');
+const notifBtn   = document.getElementById('notifBtn');
+
+
+// ── Set status display ────────────────────────────────────
+function setConnected(yes) {
+  dot.className        = 'status-dot-big' + (yes ? '' : ' offline');
+  statusText.textContent = yes ? 'LINKED TO JARVIS' : 'OFFLINE';
+  statusText.className   = 'status-text' + (yes ? '' : ' offline');
+}
+
+
+// ── Add a log line ─────────────────────────────────────────
+function log(text) {
+  const d   = document.createElement('div');
+  d.className = 'log-entry';
+  d.innerHTML = `<div class="log-dot"></div><span>${text}</span>`;
+  logPanel.prepend(d);
+  while (logPanel.children.length > 12) logPanel.removeChild(logPanel.lastChild);
+}
+
+
+// ── Notification permission ────────────────────────────────
+notifBtn.onclick = async () => {
+  const perm = await Notification.requestPermission();
+  notifBtn.textContent = perm === 'granted'
+    ? 'NOTIFICATIONS ENABLED ✓'
+    : 'PERMISSION DENIED';
+  notifBtn.disabled = true;
+};
+
+// Auto-hide if already granted
+if (Notification.permission === 'granted') {
+  notifBtn.textContent = 'NOTIFICATIONS ENABLED ✓';
+  notifBtn.disabled = true;
+}
+
+
+// ── Execute a command from JARVIS ─────────────────────────
+async function execute(type, params) {
+  log(`▸ ${type}${params.name ? ' → ' + params.name : ''}`);
+
+  switch (type) {
+
+    case 'call':
+      window.location.href = `tel:${params.number}`;
+      break;
+
+    case 'sms': {
+      const body = encodeURIComponent(params.message || '');
+      window.location.href = `sms:${params.number}?body=${body}`;
+      break;
+    }
+
+    case 'openUrl':
+      window.open(params.url, '_blank');
+      break;
+
+    case 'openApp': {
+      // Try deep link; if app isn't installed, fails silently
+      const tmp = document.createElement('iframe');
+      tmp.style.display = 'none';
+      tmp.src = params.scheme;
+      document.body.appendChild(tmp);
+      setTimeout(() => document.body.removeChild(tmp), 2500);
+      break;
+    }
+
+    case 'notification':
+      if (Notification.permission === 'granted') {
+        new Notification(params.title || 'J.A.R.V.I.S.', {
+          body: params.body || '',
+          silent: false
+        });
+      } else {
+        log('⚠️ Notifications not enabled');
+      }
+      break;
+
+    case 'media':
+      // Opens the last active media app — limited without Tasker
+      window.location.href = 'intent://play#Intent;scheme=media;end';
+      break;
+
+    default:
+      log(`⚠️ Unknown command: ${type}`);
+  }
+}
+
+
+// ── Listen for commands ────────────────────────────────────
+onSnapshot(doc(db, 'phone_commands', 'latest'), async snap => {
+  if (!snap.exists()) return;
+  const d = snap.data();
+  if (d.done) return;                          // already handled
+
+  // Mark done immediately so it doesn't re-fire
+  try {
+    await updateDoc(doc(db, 'phone_commands', 'latest'), { done: true });
+  } catch (_) {}
+
+  await execute(d.type, d.params || {});
+});
+
+
+// ── Heartbeat — tells JARVIS this phone is online ─────────
+async function heartbeat() {
+  try {
+    await setDoc(doc(db, 'phone_commands', 'status'), {
+      lastSeen: serverTimestamp(),
+      ua: navigator.userAgent.slice(0, 80)
+    });
+    setConnected(true);
+  } catch (e) {
+    setConnected(false);
+    console.warn('Heartbeat failed:', e);
+  }
+}
+
+heartbeat();
+setInterval(heartbeat, 45_000);   // every 45 s
+
+log('Phone link active');
+
+</script>
+</body>
+</html>
+
